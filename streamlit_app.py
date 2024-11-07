@@ -84,12 +84,13 @@ jugadores_posiciones = {
 
 
 
-# Function to load data and highlight players
-def load_data_with_highlight(file_path, jugadores_posiciones):
+# Función para cargar datos y resaltar jugadores
+def load_data_with_highlight(file_content, jugadores_posiciones):
     data_frames = {}
+    excel_file = pd.ExcelFile(file_content, engine='openpyxl')
     for perfil, info in jugadores_posiciones.items():
         sheet_name = info['nombre_hoja']
-        df = pd.read_excel(file_path, sheet_name=sheet_name, engine='openpyxl')
+        df = pd.read_excel(excel_file, sheet_name=sheet_name)
         df['highlight'] = df['player_name'].apply(lambda x: 'green' if x in info['jugadores'] else 'none')
         df['player_season_minutes'] = pd.to_numeric(df['player_season_minutes'], errors='coerce').round().astype('Int64')
         df['Nota'] = pd.to_numeric(df['Nota'], errors='coerce').round(2)
@@ -98,26 +99,53 @@ def load_data_with_highlight(file_path, jugadores_posiciones):
         data_frames[sheet_name] = df
     return data_frames
 
-# Carga inicial de datos
+# Carga inicial de datos desde un repositorio privado
 @st.cache_data
 def load_data(metricas, comparacion):
+    # Obtener el token de acceso desde los secrets de Streamlit
+    access_token = st.secrets["GITHUB_TOKEN"]
+    base_repo_url = "https://raw.githubusercontent.com/manuelvidalrcdeportivo/app_scouting/main/"
+    
     file_name = files[(metricas, comparacion)]
-    data_frames = load_data_with_highlight(file_name, jugadores_posiciones)
-    resumen_general_df = pd.read_excel(file_name, sheet_name='Resumen General', engine='openpyxl')
-    if 'birth_date' in resumen_general_df.columns:
-        resumen_general_df['birth_date'] = pd.to_datetime(resumen_general_df['birth_date'], errors='coerce')
-        resumen_general_df['birth_year'] = resumen_general_df['birth_date'].dt.year
-    return data_frames, resumen_general_df
+    file_url = base_repo_url + file_name
 
-# Function to load technical information from the text file
-def load_technical_info(file_path):
-    try:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            content = file.read()
-    except UnicodeDecodeError:
-        with open(file_path, 'r', encoding='latin-1') as file:
-            content = file.read()
-    return content
+    # Realizar la solicitud GET al archivo con autenticación
+    headers = {"Authorization": f"token {access_token}"}
+    response = requests.get(file_url, headers=headers)
+
+    if response.status_code == 200:
+        file_content = BytesIO(response.content)
+        data_frames = load_data_with_highlight(file_content, jugadores_posiciones)
+        resumen_general_df = pd.read_excel(file_content, sheet_name='Resumen General', engine='openpyxl')
+
+        if 'birth_date' in resumen_general_df.columns:
+            resumen_general_df['birth_date'] = pd.to_datetime(resumen_general_df['birth_date'], errors='coerce')
+            resumen_general_df['birth_year'] = resumen_general_df['birth_date'].dt.year
+
+        return data_frames, resumen_general_df
+    else:
+        st.error(f"Error al leer el archivo {file_name}: {response.status_code}")
+        return None, None
+
+# Función para cargar información técnica desde un archivo de texto en un repositorio privado
+def load_technical_info(file_name):
+    access_token = st.secrets["GITHUB_TOKEN"]
+    base_repo_url = "https://raw.githubusercontent.com/manuelvidalrcdeportivo/app_scouting/main/"
+
+    file_url = base_repo_url + file_name
+    headers = {"Authorization": f"token {access_token}"}
+    response = requests.get(file_url, headers=headers)
+
+    if response.status_code == 200:
+        try:
+            content = response.content.decode('utf-8')
+        except UnicodeDecodeError:
+            content = response.content.decode('latin-1')
+        return content
+    else:
+        st.error(f"Error al leer el archivo {file_name}: {response.status_code}")
+        return None
+
 # Layout de la aplicación
 st.title("Análisis de Jugadores")
 
